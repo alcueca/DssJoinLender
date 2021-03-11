@@ -61,6 +61,15 @@ contract DssJoinLender is LibNote {
         uint256 amount,
         bytes calldata data
     ) external returns (bool) {
+        /**
+         * 1. Slip the amount into the flash lender account
+         * 2. Withdraw the amount through the Join
+         * 3. Send the amount to the borrower
+         * 4. Callback
+         * 5. Recover the amount from the borrower
+         * 6. Return the amount to the Join
+         * 7. Slip the amount out of the flash lender account
+         */
         GemJoinAbstract gemJoin = ilks[token].gemJoin;
         IERC20 gem = IERC20(gemJoin.gem());
 
