@@ -46,14 +46,52 @@ contract DssJoinLender is LibNote {
         vat.nope(usr);
     }
 
+    /// @dev Overflow-protected casting
+    function toInt256(uint256 x) internal pure returns (int256) {
+        require(x <= MAXINT256, "DssTlm/int256-overflow");
+        return(int256(x));
+    }
+    /// @dev Overflow-protected x + y
+    function add(uint256 x, uint256 y) internal pure returns (uint256 z) {
+        require((z = x + y) >= x, "DssTlm/add-overflow");
+    }
+    /// @dev Overflow-protected x * y
+    function mul(uint x, uint y) internal pure returns (uint z) {
+        require(y == 0 || (z = x * y) / y == x);
+    }
+    /// @dev Overflow-protected x * y in RAY units
+    function rmul(uint x, uint y) internal pure returns (uint z) {
+        z = mul(x, y) / 1e27;
+    }
+
+    // --- Administration ---
+    /// @dev Add a join to the Gem Flash Lending Module.
+    function init(bytes32 ilk, address gemJoin, uint256 fee) external note auth {
+        address token = address(GemJoinAbstract(gemJoin).gem());
+        require(ilks[token].gemJoin == address(0), "DssGflm/ilk-already-init");
+        ilks[token].ilk = ilk;
+        ilks[token].gemJoin = gemJoin;
+        ilks[token].fee = fee;
+
+        // TODO: auth
+    }
+
     function maxFlashLoan(
         address token
-    ) external view returns (uint256);
+    ) external view returns (uint256) {
+        GemJoinAbstract gemJoin = ilks[token].gemJoin;
+        if (address(gemJoin) == address(0)) return 0;
+        IERC20 gem = IERC20(gemJoin.gem());
+        return gem.balanceOf(address(gemJoin));
+    }
 
     function flashFee(
         address token,
         uint256 amount
-    ) external view returns (uint256);
+    ) external view returns (uint256) {
+        require(ilks[token].gemJoin != address(0), "DssGflm/unsupported-token");
+        return rmul(amount, ilks[token].fee);
+    }
 
     function flashLoan(
         IERC3156FlashBorrower receiver,
@@ -78,7 +116,7 @@ contract DssJoinLender is LibNote {
         vat.slip(ilks[token].ilk, address(this), int256(amount));
         gemJoin.exit(msg.sender, amount);
 
-        uint256 _fee = amount * ilks[token].fee / 1e27;
+        uint256 _fee = rmul(amount, ilks[token].fee);
         require(
             receiver.onFlashLoan(msg.sender, token, amount, _fee, data) == CALLBACK_SUCCESS,
             "FlashLender: Callback failed"
@@ -86,7 +124,7 @@ contract DssJoinLender is LibNote {
 
         gem.transferFrom(msg.sender, address(this), add(amount, fee));
         gemJoin.join(address(this), amount);
-        vat.slip(ilks[token].ilk, address(this), -int256(amount));
+        vat.slip(ilks[token].ilk, address(this), -toInt256(amount));
         // Do something with the fee
     }
 }
